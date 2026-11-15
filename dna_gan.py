@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["encode", "decode", "GeneRecord", "codec_stats"]
+__all__ = [
+    "encode", "decode", "GeneRecord", "codec_stats",
+    "encode_transposed_conv", "decode_transposed_conv",
+]
 
 
 class GeneRecord:
@@ -80,3 +83,36 @@ def codec_stats(matrix: np.ndarray, bits: int = 8) -> dict:
         "max_abs_error": float(np.abs(matrix - decode(record)).max()),
         "bits": bits,
     }
+
+
+def encode_transposed_conv(filters: np.ndarray, bits: int = 8) -> list:
+    """Encode ConvTranspose2d weights (in_ch, out_ch, kh, kw) per input channel.
+
+    Transposed-convolution (deconvolution) layers used in GAN generators
+    store weights as (in_channels, out_channels, kh, kw) - the transpose of
+    a regular conv. Each input-channel slice is encoded with its own scale,
+    which gives lower reconstruction error than one global scale when
+    generator blocks have different magnitudes.
+
+    Returns: List of GeneRecord, one per input channel.
+    """
+    filters = np.asarray(filters, dtype=np.float64)
+    if filters.ndim != 4:
+        raise ValueError("filters must be 4-D (in_ch, out_ch, kh, kw)")
+    return [
+        encode(filters[i].reshape(1, -1), bits=bits)
+        for i in range(filters.shape[0])
+    ]
+
+
+def decode_transposed_conv(records: list, shape: tuple) -> np.ndarray:
+    """Reconstruct ConvTranspose2d weights from encode_transposed_conv output.
+
+    shape: original (in_ch, out_ch, kh, kw).
+    """
+    shape = tuple(int(s) for s in shape)
+    if len(shape) != 4 or len(records) != shape[0]:
+        raise ValueError("need one record per input channel and a 4-D shape")
+    per_channel = shape[1] * shape[2] * shape[3]
+    slices = [decode(rec).reshape(per_channel) for rec in records]
+    return np.stack(slices, axis=0).reshape(shape)
