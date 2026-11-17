@@ -1,55 +1,69 @@
 # DNA-GAN
 
-[![CI](https://github.com/kapildhinwa2010-dev/DNA-GAN/actions/workflows/ci.yml/badge.svg)](https://github.com/kapildhinwa2010-dev/DNA-GAN/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/kapildhinwa2010-dev/DNA-GAN/actions/workflows/codeql.yml/badge.svg)](https://github.com/kapildhinwa2010-dev/DNA-GAN/actions/workflows/codeql.yml)
+DNA-GAN is a small NumPy library for lossy quantization of weight arrays, with a helper for encoding and decoding transposed-convolution weights commonly stored by GAN generator layers. It provides a codec; it does not implement a GAN, model training, inference, or a training-data pipeline.
 
+## Status and scope
 
-DNA quantized codec tuned for GAN generator weights: per-input-channel ConvTranspose encoding.
+The project is declared as version `0.1.0`. The repository contains one codec module and unit tests. The implementation is limited to matrix quantization and 4-D transposed-convolution weight arrays; it does not include a GAN architecture or model-level integration.
 
-**Part of the [Kapildhinwa2010-dev Toolkit](https://github.com/kapildhinwa2010-dev/Kapildhinwa2010-dev).**
+## Implemented functionality
 
-## What it does
+- `encode(matrix, bits=8)` quantizes a non-empty 2-D matrix into a `GeneRecord`. Supported bit widths are 1 through 16.
+- `decode(record)` reconstructs a matrix from a `GeneRecord`.
+- `GeneRecord` stores the quantized codes and range/shape metadata, and provides `to_dict()`, `from_dict()`, and `nbytes()` helpers. `to_dict()` returns a Python dictionary containing a NumPy array; it is not a file serialization format.
+- `encode_transposed_conv(filters, bits=8)` accepts a 4-D array in `(in_channels, out_channels, kernel_height, kernel_width)` order and creates one independently quantized record per input channel. `decode_transposed_conv(records, shape)` reconstructs the array.
+- `codec_stats(matrix, bits=8)` reports an estimated size ratio and reconstruction error for a matrix.
 
-DNA-GAN is the GAN-specialized member of the DNA codec family
-(lineage: the private DNA repository). encode()/decode() quantize a
-float matrix into a GeneRecord; the GAN-specific part is
-encode_transposed_conv()/decode_transposed_conv(): ConvTranspose2d
-weights (in_ch, out_ch, kh, kw) - the transpose of a regular conv -
-are encoded per INPUT channel, each slice with its own scale.
+The encoding uses the minimum and maximum of each encoded matrix or channel slice to map values to uniformly spaced integer codes. Decoding is therefore approximate and lossy in general.
 
-## Install
+## Installation
+
+From the repository root, install the project and its runtime dependency:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install .
 ```
 
-## Quick start
+To install the test dependencies as well, use:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+The project metadata requires Python 3.9 or newer and NumPy 1.24 or newer.
+
+## Example
 
 ```python
-from dna_gan import encode_transposed_conv, decode_transposed_conv
+import numpy as np
+from dna_gan import (
+    decode,
+    decode_transposed_conv,
+    encode,
+    encode_transposed_conv,
+)
 
-records = encode_transposed_conv(deconv_weight, bits=8)  # (in_ch, out_ch, kh, kw)
-restored = decode_transposed_conv(records, deconv_weight.shape)
+weights = np.random.default_rng(0).standard_normal((8, 16))
+record = encode(weights, bits=8)
+restored_weights = decode(record)
+
+# Layout: (in_channels, out_channels, kernel_height, kernel_width)
+filters = np.random.default_rng(1).standard_normal((8, 4, 3, 3))
+records = encode_transposed_conv(filters, bits=8)
+restored_filters = decode_transposed_conv(records, filters.shape)
 ```
 
-## API
+## Tests and CI
 
-- encode(matrix, bits) / decode(record) / codec_stats(matrix, bits)
-- encode_transposed_conv(filters, bits) - one GeneRecord per input channel
-- decode_transposed_conv(records, shape) - restores the 4-D tensor
+On the inspected repository commit, `python -m pytest -q` completed successfully: **16 tests passed**. GitHub Actions also reports successful CI and CodeQL runs for that commit. The CI workflow runs pytest, compilation, and an import/round-trip smoke check on Python 3.10, 3.11, and 3.12. These checks do not establish model-level quality or performance; the repository contains no benchmark results.
 
-## Honest results and limitations
+## Limitations
 
-- Lossy: error equals the quantization step of each input-channel
-  slice.
-- Only the (in_ch, out_ch, kh, kw) ConvTranspose layout; regular
-  conv weights belong in DNA-CNN.
-- "Ratio" in codec_stats() is float32-bytes / encoded-bytes
-  ARITHMETIC - it counts stored codes, not a real serialized file.
-- No per-layer fitting: the reserv.dean-part-2 log records that
-  generated-weight reconstructions of trained models were not usable
-  without per-layer fitting.
+- Quantization is lossy. Reconstruction error depends on the value range and selected bit width.
+- The transposed-convolution helper handles only the stated 4-D `(in_channels, out_channels, kernel_height, kernel_width)` layout. The general `encode` function accepts only non-empty 2-D matrices.
+- `codec_stats()` assumes four bytes per original value when estimating the uncompressed size, and `GeneRecord.nbytes()` counts code-array bytes plus a fixed 16-byte metadata allowance. The reported ratio is an estimate, not the size of a serialized file.
+- The repository does not provide a model, trainer, inference pipeline, file-format serializer, or benchmark suite.
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+The repository includes an MIT License. See [LICENSE](LICENSE) for its terms and copyright notice.
